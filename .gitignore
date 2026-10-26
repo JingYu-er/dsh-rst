@@ -2,7 +2,7 @@ node_modules/
 pnpm-lock.yaml
 .npm-cache/
 .npmcache/
-
+.vscode/
 *.tgz
 *.log
 *.tmp
