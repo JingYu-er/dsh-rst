@@ -18,6 +18,11 @@
     "README_EN.md",
     "LICENSE"
   ],
+  "scripts": {
+    "pack": "npm pack --dry-run",
+    "publish:dry": "npm publish --dry-run",
+    "release": "npm publish"
+  },
   "engines": {
     "node": ">=20"
   },
