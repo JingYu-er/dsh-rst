@@ -1,0 +1,48 @@
+{
+  "name": "dsh-rst",
+  "version": "0.2.4",
+  "description": "用 /rst 一条命令重启 DSH：由进程外启动器关掉当前进程并拉起新的，重启完成后把回执写回你发起重启的那条会话。",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "relaunch.cjs",
+    "relaunch.ps1",
+    "cordis.patch.yml",
+    "docs",
+    "README.md",
+    "README_EN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "restart",
+    "slash-command",
+    "windows"
+  ],
+  "author": "dsh-rst contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JingYu-er/dsh-rst.git"
+  },
+  "homepage": "https://github.com/JingYu-er/dsh-rst#readme",
+  "bugs": {
+    "url": "https://github.com/JingYu-er/dsh-rst/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}

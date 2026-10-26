@@ -1,0 +1,4 @@
+# dsh-rst 的 bundle patch：把插件本体（index.js，宿主侧，无 UI）插进 loader 树。
+- insert:
+    - id: dsh-rst
+      name: dsh-rst

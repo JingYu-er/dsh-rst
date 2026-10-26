@@ -1,0 +1,13 @@
+node_modules/
+pnpm-lock.yaml
+.npm-cache/
+.npmcache/
+
+*.tgz
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

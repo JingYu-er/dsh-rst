@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check
+        run: |
+          node --check index.js
+          node --check relaunch.cjs
+
+      - name: Import smoke test (cordis contract)
+        run: |
+          node -e "import('./index.js').then(m => { if (m.name !== 'dsh-rst' || typeof m.apply !== 'function') { console.error('unexpected exports:', Object.keys(m)); process.exit(1); } console.log('ok', m.name); })"
