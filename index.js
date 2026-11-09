@@ -10,10 +10,11 @@
  *
  * 时序：
  *   /rst → Host 写日志 + 起一个分离的 PowerShell 启动器 → 立即返回
- *        → 启动器等 0.7 s（让消息落盘、让界面刷出来）
- *        → 请外壳正常退出（WM_CLOSE）；2 s 没退就强杀
+ *        → 启动器等 2 s（让消息落盘、让界面刷出来）
+ *        → 请外壳正常退出（WM_CLOSE）；5 s 没退就强杀
  *        → 确认 Host 真死（端口和单实例锁都在它手里）
- *        → Start-Process 拉起同一个可执行文件
+ *        → 等 Web 端口与 bili 引擎端口释放（旧引擎要先 flush 退场，最多 30 s）
+ *        → 拉起同一个可执行文件
  *
  * 安全闸（都在 relaunch.ps1 里，宿主这边只是传参）：
  *   · 动手前先核对「父进程路径 == 要拉起的可执行文件」，
@@ -33,8 +34,14 @@ export const name = "dsh-rst";
 /** 启动器脚本：与 index.js 同目录（纯 Node 实现，不依赖 PowerShell）。 */
 const HELPER_SCRIPT = fileURLToPath(new URL("./relaunch.cjs", import.meta.url));
 
-/** 桌面版给外壳的"正常退出"窗口；超时后强杀。 */
-const DEFAULT_GRACE_MS = 2000;
+/** 桌面版给外壳的"正常退出"窗口；超时后强杀。v0.3.0 起从 2 s 放宽到 5 s，尽量让应用自己退场。 */
+const DEFAULT_GRACE_MS = 5000;
+
+/**
+ * 旧 bili 引擎 flush 并退出需要时间（watchdog 发现 parent-gone + 落盘，实测约 10 s）。
+ * 拉起新实例前最多等这么久，等它把 Web 端口和引擎端口都释放掉。
+ */
+const DEFAULT_ENGINE_WAIT_MS = 30000;
 
 /** 启动器动手前的等待：留出 2 秒让命令回执落盘、界面刷出来，然后才送走进程。 */
 const DEFAULT_DELAY_MS = 2000;
@@ -213,6 +220,44 @@ async function announceRestart(ctx) {
 }
 //#endregion
 
+/**
+ * bili 引擎端口：重启前也要等它释放。
+ * 优先看启动器导出的 BILLION_CONTEXT_PROXY（bili dsh 场景），
+ * 其次看引擎自己写的 port-zone.json（桌面版原生插件 attach 场景）。
+ * 没装 bili 就返回 0，不影响非 bili 环境。
+ */
+function biliEnginePort() {
+    const proxy = process.env.BILLION_CONTEXT_PROXY;
+    if (proxy) {
+        try {
+            const port = Number.parseInt(new URL(proxy).port, 10);
+            if (Number.isFinite(port) && port > 0) return port;
+        } catch {
+            // 不是合法 URL 就继续往下找。
+        }
+    }
+    try {
+        const zonePath = join(homedir(), ".local", "state", "billion-context", "port-zone.json");
+        const zone = JSON.parse(readFileSync(zonePath, "utf8"));
+        const lanes = zone?.lanes ?? {};
+        const lane = lanes.dsh ?? Object.values(lanes)[0];
+        const port = Number.parseInt(lane, 10);
+        if (Number.isFinite(port) && port > 0) return port;
+    } catch {
+        // 没有 port-zone.json（没装 bili / 还没起过引擎）就忽略。
+    }
+    return 0;
+}
+
+/** 拉起新实例前要等这些端口释放：Web 端口 + bili 引擎端口。 */
+function waitPortsForPlan(web) {
+    const ports = new Set();
+    if (web > 0) ports.add(web);
+    const engine = biliEnginePort();
+    if (engine > 0) ports.add(engine);
+    return [...ports].sort((a, b) => a - b);
+}
+
 /** Web 端口：重启前要确认它已经释放，否则新实例起不来。 */
 function webPort() {
     const match = /:(\d+)/u.exec(process.env.DSH_WEB_URL ?? "");
@@ -229,7 +274,8 @@ function quoteArgument(value) {
 /**
  * 算出这次重启要做什么。
  * @returns {{ok: true, mode: "desktop"|"cli", exe: string, workDir: string, exeArgs: string,
- *            shellPid: number, hostPid: number, graceMs: number, logPath: string}
+ *            shellPid: number, hostPid: number, graceMs: number, engineWaitMs: number,
+ *            delayMs: number, waitPorts: number[], logPath: string}
  *          | {ok: false, reason: string}}
  */
 function buildPlan() {
@@ -249,7 +295,9 @@ function buildPlan() {
             shellPid: process.ppid,
             hostPid: process.pid,
             port,
+            waitPorts: waitPortsForPlan(port),
             graceMs: DEFAULT_GRACE_MS,
+            engineWaitMs: DEFAULT_ENGINE_WAIT_MS,
             delayMs: DEFAULT_DELAY_MS,
             logPath,
         };
@@ -268,7 +316,9 @@ function buildPlan() {
         shellPid: 0,
         hostPid: process.pid,
         port,
+        waitPorts: waitPortsForPlan(port),
         graceMs: 0,
+        engineWaitMs: DEFAULT_ENGINE_WAIT_MS,
         delayMs: DEFAULT_DELAY_MS,
         logPath,
     };
@@ -278,10 +328,11 @@ function describePlan(plan) {
     if (plan.mode === "desktop") {
         return [
             "/rst 计划（--dry-run，未执行）",
-            "模式：桌面版 —— 先等 2 s，再请外壳正常退出，2 s 未退则强杀，最后由独立启动器重新拉起",
+            "模式：桌面版 —— 先等 2 s，请外壳正常退出（5 s 宽限），等 Host 与 bili 引擎端口释放（最多 30 s），再由独立启动器拉起",
             "外壳 PID：" + String(plan.shellPid) + "（Electron 主进程）",
             "Host PID：" + String(plan.hostPid),
             "Web 端口：" + (plan.port > 0 ? String(plan.port) : "（未探测到）"),
+            "等待释放的端口：" + (plan.waitPorts.length > 0 ? plan.waitPorts.join(", ") : "（无）"),
             "可执行文件：" + plan.exe,
             "日志：" + plan.logPath,
         ].join("\n");
@@ -291,6 +342,7 @@ function describePlan(plan) {
         "模式：命令行版 —— 本进程退场后，用同样的命令行重新拉起",
         "Host PID：" + String(plan.hostPid),
         "可执行文件：" + plan.exe + " " + plan.exeArgs,
+        "等待释放的端口：" + (plan.waitPorts.length > 0 ? plan.waitPorts.join(", ") : "（无）"),
         "工作目录：" + plan.workDir,
         "日志：" + plan.logPath,
     ].join("\n");
@@ -326,8 +378,10 @@ async function launchHelper(plan) {
         "--log", plan.logPath,
         "--delay", String(plan.delayMs),
         "--grace", String(plan.graceMs),
+        "--enginewait", String(plan.engineWaitMs),
     ];
     if (plan.port > 0) argv.push("--port", String(plan.port));
+    if (plan.waitPorts.length > 0) argv.push("--waitports", plan.waitPorts.join(","));
     if (plan.exeArgs !== "") argv.push("--exeargs", plan.exeArgs);
     traceHost("launchHelper: exe=" + process.execPath + " argv=" + JSON.stringify(argv));
     const child = spawn(process.execPath, argv, {

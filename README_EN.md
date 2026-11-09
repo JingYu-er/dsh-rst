@@ -5,7 +5,7 @@
 中文: [README.md](README.md) · [Install](#install) · [Screenshot](#screenshot) · [Quick start](#quick-start) · [Timeline](#timeline) · [Safety](#safety-boundaries) · [The receipt](#the-restart-receipt) · [Logs](#state-files-and-logs) · [Limitations](#compatibility-and-known-limitations)
 
 [![GitHub stars](https://img.shields.io/github/stars/JingYu-er/dsh-rst?style=flat)](https://github.com/JingYu-er/dsh-rst)
-![version](https://img.shields.io/badge/version-0.2.4-blue)
+![version](https://img.shields.io/badge/version-0.3.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -90,9 +90,9 @@ you: /rst
  │       (sessionId / startedAt / shellPid / hostPid)
  │
  ├─ spawns relaunch.cjs with process.execPath + ELECTRON_RUN_AS_NODE=1 (detached)
- │    └─ launcher: wait 2 s → safety gate → graceful stop of the host
- │       → wait for host exit → wait for the web port → launch the same exe
- │       → write restart-<ts>.log
+ │    └─ launcher: wait 2 s → safety gate → graceful stop of the host (5 s grace)
+ │       → wait for host exit → wait for the web port and the bili engine port (up to 30 s)
+ │       → launch the same exe → write restart-<ts>.log
  │
  └─ new host is up, DSH restores the session
       └─ plugin polls sessions.get(sessionId) every 500 ms, up to 180 s
@@ -143,12 +143,12 @@ All under `%LOCALAPPDATA%\dsh-rst\`:
 | Aspect | Desktop mode | CLI mode |
 |--------|--------------|----------|
 | Detection | `process.versions.electron` present and `process.send` is a function | everything else |
-| What gets stopped | `taskkill /PID <Electron main>` (graceful first, forced after 2 s) | launcher calls `process.exit(0)` |
+| What gets stopped | `taskkill /PID <Electron main>` (graceful first, forced after 5 s) | launcher calls `process.exit(0)` |
 | What gets relaunched | the same exe with `ELECTRON_RUN_AS_NODE` removed from env | same node binary, same argv |
-| Port wait | port parsed from `DSH_WEB_URL`, waits up to 10 s | none |
+| Port wait | web port from `DSH_WEB_URL` plus the bili engine port, waits up to 30 s | bili engine port only |
 | Failure surface | command card reports launcher PID and log path | same |
 
-Launcher arguments: `--shell --host --exe --workdir --log --delay --grace [--port] [--exeargs]`; defaults are `delay=2000ms` (time for the command card to be persisted) and `grace=2000ms` (graceful shutdown allowance). A failed launch is retried up to 3 times, checking survival 1 s after each spawn.
+Launcher arguments: `--shell --host --exe --workdir --log --delay --grace --enginewait [--port] [--waitports] [--exeargs]`; defaults are `delay=2000ms` (time for the command card to be persisted), `grace=5000ms` (graceful shutdown allowance) and `enginewait=30000ms` (how long to wait for the bili engine and other held ports to be released). `--waitports` is a comma-separated list of ports to wait for; it is merged with `--port` and de-duplicated. A failed launch is retried up to 3 times, checking survival 1 s after each spawn.
 
 Environment: `DSH_WEB_URL` (web port), `LOCALAPPDATA` (state dir, falling back to `TEMP` / the user profile).
 
@@ -162,6 +162,10 @@ Environment: `DSH_WEB_URL` (web port), `LOCALAPPDATA` (state dir, falling back t
 - A restart interrupts any in-flight turn — do not `/rst` mid-turn.
 - The command name is fixed to `rst`; rename it if another plugin uses it.
 - A timed-out `pending.json` is not cleaned up: it retries on the next startup, and if that session no longer exists you get a few timeout lines in the log (harmless).
+
+## Changelog
+
+- **0.3.0**: `/rst` now waits for the bili engine port to be released (up to 30 s) before relaunching, avoiding the race where the new instance starts while the old engine is still flushing; graceful-shutdown grace raised from 2 s to 5 s; `--exeargs` is now actually forwarded to the new instance.
 
 ## Troubleshooting
 

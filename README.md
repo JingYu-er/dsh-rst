@@ -5,7 +5,7 @@
 English: [README_EN.md](README_EN.md) · [安装](#安装) · [界面预览](#界面预览) · [快速开始](#快速开始) · [时序](#时序) · [安全边界](#安全边界) · [重启后的回执](#重启后的回执) · [日志与排障](#状态文件与日志) · [已知限制](#兼容性与已知限制)
 
 [![GitHub stars](https://img.shields.io/github/stars/JingYu-er/dsh-rst?style=flat)](https://github.com/JingYu-er/dsh-rst)
-![version](https://img.shields.io/badge/version-0.2.4-blue)
+![version](https://img.shields.io/badge/version-0.3.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -90,8 +90,8 @@ dsh plugin --profile desktop add link:D:\path\to\dsh-rst
  │       （sessionId / startedAt / shellPid / hostPid）
  │
  ├─ 用 process.execPath + ELECTRON_RUN_AS_NODE=1 spawn relaunch.cjs（detached）
- │    └─ 启动器：等 2 s → 安全闸校验 → 优雅关 Host → 等宿主退出
- │       → 等 Web 端口释放 → 拉起同一个 exe → 写 restart-<ts>.log
+ │    └─ 启动器：等 2 s → 安全闸校验 → 优雅关 Host（5 s 宽限）→ 等宿主退出
+ │       → 等 Web 端口与 bili 引擎端口释放（最多 30 s）→ 拉起同一个 exe → 写 restart-<ts>.log
  │
  └─ 新 Host 起来，DSH 恢复原会话
       └─ 插件轮询 sessions.get(sessionId)（每 500 ms，最多 180 s）
@@ -142,12 +142,12 @@ dsh plugin --profile desktop add link:D:\path\to\dsh-rst
 | 项 | 桌面模式 | CLI 模式 |
 |----|----------|----------|
 | 判定 | `process.versions.electron` 存在且 `process.send` 是函数 | 其余情况 |
-| 关掉谁 | `taskkill /PID <Electron 主进程>`（先优雅，2 s 没走再强制） | 由启动器 `process.exit(0)` |
+| 关掉谁 | `taskkill /PID <Electron 主进程>`（先优雅，5 s 没走再强制） | 由启动器 `process.exit(0)` |
 | 拉起谁 | 同一个 exe，环境里去掉 `ELECTRON_RUN_AS_NODE` | 同一个 node + 同样的 argv |
-| 等端口 | 从 `DSH_WEB_URL` 解析端口，最多等 10 s | 不等 |
+| 等端口 | 从 `DSH_WEB_URL` 解析 Web 端口 + bili 引擎端口，最多等 30 s | 只等 bili 引擎端口 |
 | 失败形态 | 命令卡片显示启动器 PID 与日志路径 | 同左 |
 
-启动器参数：`--shell --host --exe --workdir --log --delay --grace [--port] [--exeargs]`，默认 `delay=2000ms`（给命令卡片落日志的时间）、`grace=2000ms`（优雅关机的宽限）。拉起失败会重试，最多 3 次，每次拉起后 1 s 检查是否还活着。
+启动器参数：`--shell --host --exe --workdir --log --delay --grace --enginewait [--port] [--waitports] [--exeargs]`，默认 `delay=2000ms`（给命令卡片落日志的时间）、`grace=5000ms`（优雅关机的宽限）、`enginewait=30000ms`（等 bili 引擎等被占端口释放的上限）。`--waitports` 是要等的端口列表（逗号分隔），会与 `--port` 合并去重。拉起失败会重试，最多 3 次，每次拉起后 1 s 检查是否还活着。
 
 环境变量：`DSH_WEB_URL`（解析 Web 端口）、`LOCALAPPDATA`（状态目录，缺省回退 `TEMP` / 用户目录）。
 
@@ -161,6 +161,11 @@ dsh plugin --profile desktop add link:D:\path\to\dsh-rst
 - 重启会打断正在跑的回合，长回合里别 `/rst`。
 - 命令名固定 `rst`，与其他插件撞名时先改名再装。
 - `pending.json` 超时后不自动清理：下次启动会再试，如果那个会话早已不存在，日志里会多几行 timeout（无害）。
+
+## 更新日志
+
+- **0.3.0**：`/rst` 现在等 bili 引擎端口释放后再拉起（最多 30 s），避免新实例先起、旧引擎还在 flush 的竞态；优雅关机宽限 2 s → 5 s；`--exeargs` 终于真的传给新实例。
+- 更早版本见 git 历史。
 
 ## 排错
 

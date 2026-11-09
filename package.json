@@ -1,6 +1,6 @@
 {
   "name": "dsh-rst",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "用 /rst 一条命令重启 DSH：由进程外启动器关掉当前进程并拉起新的，重启完成后把回执写回你发起重启的那条会话。",
   "type": "module",
   "main": "./index.js",
